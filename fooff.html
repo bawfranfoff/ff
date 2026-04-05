@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Control Page</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    h1, h2, h3 {
+      margin-bottom: 10px;
+    }
+
+    .topbar {
+      margin-bottom: 20px;
+    }
+
+    button {
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+
+    .pair-wrap {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 30px;
+    }
+
+    .grid-block {
+      border: 1px solid #ccc;
+      padding: 16px;
+      border-radius: 8px;
+    }
+
+    .grid4x4 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .cell {
+      border: 1px solid #ddd;
+      padding: 10px;
+      border-radius: 6px;
+      background: #fafafa;
+    }
+
+    .cell label {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 6px;
+      font-weight: bold;
+    }
+
+    .cell input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      margin-bottom: 8px;
+    }
+
+    .status {
+      margin-top: 20px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      min-height: 22px;
+      border-radius: 6px;
+      background: #f5f5f5;
+    }
+  </style>
+</head>
+<body>
+  <h1>Control Page</h1>
+
+  <div class="topbar">
+    <button id="refreshBtn">Refresh Pool Data</button>
+  </div>
+
+  <h2>Pair 1</h2>
+  <div class="pair-wrap">
+    <div class="grid-block">
+      <h3>Pool A1</h3>
+      <div id="poolA1" class="grid4x4"></div>
+    </div>
+
+    <div class="grid-block">
+      <h3>Pool A2</h3>
+      <div id="poolA2" class="grid4x4"></div>
+    </div>
+  </div>
+
+  <h2>Pair 2</h2>
+  <div class="pair-wrap">
+    <div class="grid-block">
+      <h3>Pool B1</h3>
+      <div id="poolB1" class="grid4x4"></div>
+    </div>
+
+    <div class="grid-block">
+      <h3>Pool B2</h3>
+      <div id="poolB2" class="grid4x4"></div>
+    </div>
+  </div>
+
+  <div class="status" id="statusBox">Ready.</div>
+
+  <script>
+    const READ_API = "https://YOUR-API-ID.execute-api.ap-southeast-2.amazonaws.com/prod/poolread";
+    const UPDATE_API = "https://YOUR-API-ID.execute-api.ap-southeast-2.amazonaws.com/prod/poolupdate";
+
+    class FO {
+      constructor(obj = {}) {
+        for (let i = 1; i <= 16; i++) {
+          const key = `o${String(i).padStart(2, "0")}`;
+          this[key] = obj[key] || "";
+        }
+      }
+    }
+
+    let fo = []; // row objects from S3
+
+    function setStatus(msg) {
+      document.getElementById("statusBox").textContent = msg;
+    }
+
+    function buildCell(containerId, rowIndex, colIndex) {
+      const container = document.getElementById(containerId);
+
+      const cell = document.createElement("div");
+      cell.className = "cell";
+
+      const label = document.createElement("label");
+      label.textContent = `Row ${rowIndex} / Col ${String(colIndex).padStart(2, "0")}`;
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.id = `input_r${rowIndex}_c${colIndex}`;
+
+      const btn = document.createElement("button");
+      btn.textContent = "Commit";
+      btn.addEventListener("click", async () => {
+        await commitField(rowIndex, colIndex);
+      });
+
+      cell.appendChild(label);
+      cell.appendChild(input);
+      cell.appendChild(btn);
+      container.appendChild(cell);
+    }
+
+    function buildUI() {
+      const groups = ["poolA1", "poolA2", "poolB1", "poolB2"];
+      groups.forEach(id => {
+        document.getElementById(id).innerHTML = "";
+      });
+
+      // Example mapping:
+      // poolA1 = rows 0-3, cols 1-4
+      // poolA2 = rows 0-3, cols 5-8
+      // poolB1 = rows 0-3, cols 9-12
+      // poolB2 = rows 0-3, cols 13-16
+
+      for (let r = 0; r < 4; r++) {
+        for (let c = 1; c <= 4; c++) buildCell("poolA1", r, c);
+        for (let c = 5; c <= 8; c++) buildCell("poolA2", r, c);
+        for (let c = 9; c <= 12; c++) buildCell("poolB1", r, c);
+        for (let c = 13; c <= 16; c++) buildCell("poolB2", r, c);
+      }
+    }
+
+    function populateFields() {
+      for (let r = 0; r < 4; r++) {
+        if (!fo[r]) continue;
+        for (let c = 1; c <= 16; c++) {
+          const key = `o${String(c).padStart(2, "0")}`;
+          const el = document.getElementById(`input_r${r}_c${c}`);
+          if (el) el.value = fo[r][key] || "";
+        }
+      }
+    }
+
+    async function refreshPool() {
+      try {
+        setStatus("Refreshing data...");
+        const res = await fetch(READ_API);
+        const json = await res.json();
+
+        fo = json.map(row => new FO(row));
+        populateFields();
+        setStatus("Refresh complete.");
+      } catch (err) {
+        setStatus("Refresh failed: " + err.message);
+      }
+    }
+
+    async function commitField(rowIndex, colIndex) {
+      try {
+        const input = document.getElementById(`input_r${rowIndex}_c${colIndex}`);
+        const value = input.value;
+
+        setStatus(`Updating row ${rowIndex}, col ${colIndex}...`);
+
+        const res = await fetch(UPDATE_API, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            row: rowIndex,
+            col: colIndex,
+            value: value
+          })
+        });
+
+        const result = await res.json();
+
+        if (!res.ok) {
+          throw new Error(result.message || "Update failed");
+        }
+
+        const key = `o${String(colIndex).padStart(2, "0")}`;
+        if (!fo[rowIndex]) fo[rowIndex] = new FO();
+        fo[rowIndex][key] = value;
+
+        setStatus(`Updated row ${rowIndex}, col ${colIndex}.`);
+      } catch (err) {
+        setStatus("Commit failed: " + err.message);
+      }
+    }
+
+    document.getElementById("refreshBtn").addEventListener("click", refreshPool);
+
+    buildUI();
+    refreshPool();
+  </script>
+</body>
+</html>
