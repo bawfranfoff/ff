@@ -5,4 +5,6 @@ simp1
 6foo2
 4oniff3w8ff5fuffuff
 fffii
-oc5
+oc512
+ocsi
+ffoo
